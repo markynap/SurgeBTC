@@ -58,7 +58,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
     address public surgeFund = 0x1e9c841A822D1D1c5764261ab5e26d4067Ca49D9;
     
     // Garbage Collector
-    uint256 garbageCollectorThreshold = 10**8;
+    uint256 garbageCollectorThreshold = 10**10;
 
     // initialize some stuff
     constructor ( address peggedToken, string memory tokenName, string memory tokenSymbol, uint8 tokenDecimals, uint256 _buyFee, uint256 _sellFee, uint256 _transferFee
