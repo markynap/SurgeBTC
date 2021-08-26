@@ -70,9 +70,9 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         buyFee = _buyFee;
         sellFee = _sellFee;
         transferFee = _transferFee;
-        _balances[msg.sender] = _totalSupply;
+        _balances[address(this)] = _totalSupply;
         router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
-        emit Transfer(address(0), msg.sender, _totalSupply);
+        emit Transfer(address(0), address(this), _totalSupply);
     }
 
     function totalSupply() external view override returns (uint256) { return _totalSupply; }
