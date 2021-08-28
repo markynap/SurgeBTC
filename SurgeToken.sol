@@ -220,15 +220,12 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
             tokenAmount = tokenAmount.sub(allocation);
             // Allocate Tokens To Surge Fund
             _balances[surgeFund] = _balances[surgeFund].add(allocation);
-            // Remove tokens from supply
-            _totalSupply = _totalSupply.sub(tokenAmount);
             // Tell Blockchain
             emit Transfer(msg.sender, surgeFund, allocation);
-        } else {
-            // reduce full amount from supply
-            _totalSupply = _totalSupply.sub(tokenAmount);
         }
         
+        // Remove tokens from supply
+        _totalSupply = _totalSupply.sub(tokenAmount);
         // how many Tokens are these tokens worth?
         amountToken = tokensToSwap.mul(calculatePrice());
         // send Tokens to Seller
