@@ -1,14 +1,12 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.0;
 
-import "./Context.sol";
-import "./Ownable.sol";
 import "./SafeMath.sol";
 import "./Address.sol";
 import "./IUniswapV2Router02.sol";
 import "./ReentrantGuard.sol";
 import "./IERC20.sol";
-
+import "./INativeSurge.sol";
 /**
  * Contract: Surge Token
  * Developed By: Markymark (aka DeFi Mark)
@@ -19,7 +17,7 @@ import "./IERC20.sol";
  * Price is calculated as a ratio between Total Supply and underlying asset in Contract
  *
  */
-contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
+contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     using SafeMath for uint256;
     using SafeMath for uint8;
@@ -46,7 +44,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
     bool public emergencyModeEnabled = false;
     
     // Pegged Asset
-    address public _token;
+    address public immutable _token;
     
     // PCS Router
     IUniswapV2Router02 public router; 
@@ -54,24 +52,42 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
     // Surge Fund Data
     bool public allowFunding = true;
     uint256 public fundingBuySellDenominator = 100;
-    uint256 public fundingTransferDenominator = 5;
-    address public surgeFund = 0x1e9c841A822D1D1c5764261ab5e26d4067Ca49D9;
+    uint256 public fundingTransferDenominator = 4;
+    address public surgeFund = 0x95c8eE08b40107f5bd70c28c4Fd96341c8eaD9c7;
     
     // Garbage Collector
     uint256 garbageCollectorThreshold = 10**10;
+    
+    // owner
+    address _owner;
+    
+    modifier onlyOwner() {
+        require(msg.sender == _owner, 'Only Owner Function');
+        _;
+    }
 
     // initialize some stuff
     constructor ( address peggedToken, string memory tokenName, string memory tokenSymbol, uint8 tokenDecimals, uint256 _buyFee, uint256 _sellFee, uint256 _transferFee
     ) {
+        // ensure arguments meet criteria
+        require(_buyFee <= 100 && _sellFee <= 100 && _transferFee <= 100, 'Invalid Fees, Must Range From 0 - 100');
+        require(peggedToken != address(0), 'cannot peg to zero address');
+        // underlying asset
         _token = peggedToken;
+        // token stats
         _name = tokenName;
         _symbol = tokenSymbol;
         _decimals = tokenDecimals;
+        // fees
         buyFee = _buyFee;
         sellFee = _sellFee;
         transferFee = _transferFee;
-        _balances[address(this)] = _totalSupply;
+        // initialize Pancakeswap Router
         router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+        // ownership
+        _owner = msg.sender;
+        // allot starting 1 billion to contract to be Garbage Collected
+        _balances[address(this)] = _totalSupply;
         emit Transfer(address(0), address(this), _totalSupply);
     }
 
@@ -124,7 +140,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         uint256 oldPrice = calculatePrice();
         
         if (allowFunding && sender != surgeFund && recipient != surgeFund) {
-            // allocate 20% of the tax for Surge Fund
+            // allocate percentage of the tax for Surge Fund
             uint256 allocation = tax.div(fundingTransferDenominator);
             // how much are we removing from total supply
             tax = tax.sub(allocation);
@@ -142,7 +158,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         // Transfer Event
         emit Transfer(sender, recipient, tAmount);
         // Emit The Price Change
-        emit PriceChange(oldPrice, currentPrice);
+        emit PriceChange(oldPrice, currentPrice, _totalSupply);
         return true;
     }
     
@@ -191,12 +207,12 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         // Emit Transfer
         emit Transfer(address(this), msg.sender, tokensToSend);
         // Emit The Price Change
-        emit PriceChange(oldPrice, currentPrice);
+        emit PriceChange(oldPrice, currentPrice, _totalSupply);
         return true;
     }
     
-    /** Sells SURGE Tokens And Deposits the BNB into Seller's Address */
-    function sell(uint256 tokenAmount) public nonReentrant returns (bool) {
+    /** Sells SURGE Tokens And Deposits the Underlying Asset into Seller's Address */
+    function sell(uint256 tokenAmount) external nonReentrant override {
         
         // make sure seller has this balance
         require(_balances[msg.sender] >= tokenAmount, 'cannot sell above token amount');
@@ -206,8 +222,6 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'sender does not have this amount to sell');
         // calculate price change
         uint256 oldPrice = calculatePrice();
-        // transaction success
-        bool successful;
         // number of underlying asset tokens to claim
         uint256 amountToken;
 
@@ -229,7 +243,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         // how many Tokens are these tokens worth?
         amountToken = tokensToSwap.mul(calculatePrice());
         // send Tokens to Seller
-        successful = IERC20(_token).transfer(msg.sender, amountToken);
+        bool successful = IERC20(_token).transfer(msg.sender, amountToken);
         // ensure Tokens were delivered
         require(successful, 'Unable to Complete Transfer of Tokens');
         // get current price
@@ -239,20 +253,23 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         // Emit Transfer
         emit Transfer(msg.sender, address(this), tokenAmount);
         // Emit The Price Change
-        emit PriceChange(oldPrice, currentPrice);
-        return true;
+        emit PriceChange(oldPrice, currentPrice, _totalSupply);
     }
     
     /**
      * Buys Token with BNB, storing in the contract
      */
     function buyToken(uint256 amount) private {
+        // BNB -> Token Pairing
         address[] memory path = new address[](2);
         path[0] = router.WETH();
         path[1] = _token;
+        
+        // require less than 1% slippage
+        uint256 minOut = router.getAmountsOut(amount, path)[1].mul(99).div(100);
 
         try router.swapExactETHForTokens{value: amount}(
-            0,
+            minOut,
             path,
             address(this),
             block.timestamp.add(30)
@@ -286,6 +303,11 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
     function getFees() public view returns(uint256, uint256, uint256) {
         return (buyFee,sellFee,transferFee);
     }
+
+    /** Returns The Address of the Underlying Asset */
+    function getUnderlyingAsset() external override view returns(address) {
+        return _token;
+    }
     
     /** Allows A User To Erase Their Holdings From Supply */
     function eraseHoldings() external {
@@ -300,7 +322,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
         // remove tokens from supply
         _totalSupply = _totalSupply.sub(bal, 'total supply cannot be negative');
         // Emit Price Difference
-        emit PriceChange(oldPrice, calculatePrice());
+        emit PriceChange(oldPrice, calculatePrice(), _totalSupply);
         // Emit Call
         emit ErasedHoldings(msg.sender, bal);
     }
@@ -379,8 +401,20 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
             // Emit Call
             emit GarbageCollected(bal);
             // Emit Price Difference
-            emit PriceChange(oldPrice, calculatePrice());
+            emit PriceChange(oldPrice, calculatePrice(), _totalSupply);
         }
+    }
+    
+    /** Transfers Ownership To Another User */
+    function transferOwnership(address newOwner) external onlyOwner {
+        _owner = newOwner;
+        emit TransferOwnership(newOwner);
+    }
+    
+    /** Transfers Ownership To Zero Address */
+    function renounceOwnership() external onlyOwner {
+        _owner = payable(address(0));
+        emit TransferOwnership(address(0));
     }
     
     /** Mint Tokens to Buyer */
@@ -390,7 +424,7 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
     }
     
     // EVENTS
-    event PriceChange(uint256 previousPrice, uint256 currentPrice);
+    event PriceChange(uint256 previousPrice, uint256 currentPrice, uint256 totalSupply);
     event SwappedFundReceiver(address newFundReceiver);
     event PancakeswapRouterUpdated(address newRouter);
     event ErasedHoldings(address who, uint256 amountTokensErased);
@@ -400,4 +434,5 @@ contract SurgeToken is IERC20, Context, Ownable, ReentrancyGuard {
     event FundingValuesChanged(uint256 buySellDenominator, uint256 transferDenominator);
     event UpdatedGarbageCollectorThreshold(uint256 newThreshold);
     event EmergencyModeEnabled();
+    event TransferOwnership(address newOwner);
 }
