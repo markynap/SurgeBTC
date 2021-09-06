@@ -68,6 +68,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     // owner
     address _owner;
     
+    // Activates Surge Token Trading
     bool Surge_Token_Activated;
     
     modifier onlyOwner() {
@@ -349,12 +350,18 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         emit ErasedHoldings(msg.sender, bal);
     }
     
+    /** Enables Trading For This Surge Token, This Action Cannot be Undone */
     function ActivateSurgeToken() external onlyOwner {
         Surge_Token_Activated = true;
         emit SurgeTokenActivated();
     }
     
-    /** Fail Safe Incase Withdrawal is Absolutely Necessary, Allowing Users To Withdraw 100% of their asset -- IRREVERSABLE */
+   /*
+    * Fail Safe Incase Withdrawal is Absolutely Necessary
+    * Allows Users To Withdraw 100% Of The Underlying Asset
+    * This will disable the ability to purchase Surge Tokens
+    * This Action Cannot Be Undone
+    */
     function enableEmergencyMode() external onlyOwner {
         require(!emergencyModeEnabled, 'Emergency Mode Already Enabled');
         // disable fees
