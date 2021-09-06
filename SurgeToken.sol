@@ -68,6 +68,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     // owner
     address _owner;
     
+    bool Surge_Token_Activated;
+    
     modifier onlyOwner() {
         require(msg.sender == _owner, 'Only Owner Function');
         _;
@@ -183,7 +185,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     /** Purchases SURGE Tokens and Deposits Them in Sender's Address*/
     function purchase() private nonReentrant returns (bool) {
         // make sure emergency mode is disabled
-        require(!emergencyModeEnabled, 'EMERGENCY MODE ENABLED');
+        require(!emergencyModeEnabled && Surge_Token_Activated, 'EMERGENCY MODE ENABLED');
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
         // buy Tokens with the BNB received
@@ -347,6 +349,11 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         emit ErasedHoldings(msg.sender, bal);
     }
     
+    function ActivateSurgeToken() external onlyOwner {
+        Surge_Token_Activated = true;
+        emit SurgeTokenActivated();
+    }
+    
     /** Fail Safe Incase Withdrawal is Absolutely Necessary, Allowing Users To Withdraw 100% of their asset -- IRREVERSABLE */
     function enableEmergencyMode() external onlyOwner {
         require(!emergencyModeEnabled, 'Emergency Mode Already Enabled');
@@ -448,14 +455,16 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     // EVENTS
     event PriceChange(uint256 previousPrice, uint256 currentPrice, uint256 totalSupply);
+    event FundingValuesChanged(uint256 buySellDenominator, uint256 transferDenominator);
+    event ErasedHoldings(address who, uint256 amountTokensErased);
+    event UpdatedGarbageCollectorThreshold(uint256 newThreshold);
+    event GarbageCollected(uint256 amountTokensErased);
     event SwappedFundReceiver(address newFundReceiver);
     event PancakeswapRouterUpdated(address newRouter);
-    event ErasedHoldings(address who, uint256 amountTokensErased);
-    event GarbageCollected(uint256 amountTokensErased);
-    event FundingEnabled();
-    event FundingDisabled();
-    event FundingValuesChanged(uint256 buySellDenominator, uint256 transferDenominator);
-    event UpdatedGarbageCollectorThreshold(uint256 newThreshold);
-    event EmergencyModeEnabled();
     event TransferOwnership(address newOwner);
+    event EmergencyModeEnabled();
+    event SurgeTokenActivated();
+    event FundingDisabled();
+    event FundingEnabled();
+    
 }
