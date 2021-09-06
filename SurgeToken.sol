@@ -58,6 +58,13 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     // Garbage Collector
     uint256 garbageCollectorThreshold = 10**10;
     
+    // path from BNB -> _token
+    address[] path;
+    
+    // paths for checking balances
+    address[] tokenToBNB;
+    address[] bnbToBusd;
+    
     // owner
     address _owner;
     
@@ -86,6 +93,17 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
         // ownership
         _owner = msg.sender;
+        // initialize pcs path for swapping
+        path = new address[](2);
+        path[0] = router.WETH();
+        path[1] = peggedToken;
+        // initalize other paths for balance checking
+        tokenToBNB = new address[](2);
+        bnbToBusd = new address[](2);
+        tokenToBNB[0] = peggedToken;
+        tokenToBNB[1] = router.WETH();
+        bnbToBusd[0] = router.WETH();
+        bnbToBusd[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
         // allot starting 1 billion to contract to be Garbage Collected
         _balances[address(this)] = _totalSupply;
         emit Transfer(address(0), address(this), _totalSupply);
@@ -260,11 +278,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
      * Buys Token with BNB, storing in the contract
      */
     function buyToken(uint256 amount) private {
-        // BNB -> Token Pairing
-        address[] memory path = new address[](2);
-        path[0] = router.WETH();
-        path[1] = _token;
-        
         // require less than 1% slippage
         uint256 minOut = router.getAmountsOut(amount, path)[1].mul(99).div(100);
 
@@ -308,6 +321,13 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     function getUnderlyingAsset() external override view returns(address) {
         return _token;
     }
+
+    /** Returns Value of Holdings in USD */
+    function getValueOfHoldingsInUSD(address holder) public view returns(uint256) {
+        if (_balances[holder] == 0) return 0;
+        uint256 assetInBNB = router.getAmountsOut(_balances[holder], tokenToBNB)[1];
+        return router.getAmountsOut(assetInBNB, bnbToBusd)[1]; 
+    }
     
     /** Allows A User To Erase Their Holdings From Supply */
     function eraseHoldings() external {
@@ -343,6 +363,9 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     /** Incase Pancakeswap Upgrades To V3 */
     function changePancakeswapRouterAddress(address newPCSAddress) external onlyOwner {
         router = IUniswapV2Router02(newPCSAddress);
+        path[0] = router.WETH();
+        tokenToBNB[1] = router.WETH();
+        bnbToBusd[0] = router.WETH();
         emit PancakeswapRouterUpdated(newPCSAddress);
     }
 
