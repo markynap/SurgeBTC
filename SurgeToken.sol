@@ -413,7 +413,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     /** Transfers Ownership To Zero Address */
     function renounceOwnership() external onlyOwner {
-        _owner = address(0);
+        _owner = payable(address(0));
         emit TransferOwnership(address(0));
     }
     
