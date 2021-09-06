@@ -71,6 +71,9 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     // Activates Surge Token Trading
     bool Surge_Token_Activated;
     
+    // number of token holders
+    uint256 public _holderCount;
+    
     modifier onlyOwner() {
         require(msg.sender == _owner, 'Only Owner Function');
         _;
@@ -150,6 +153,11 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         // make standard checks
         require(recipient != address(0), "BEP20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
+        if (_balances[sender] == amount) {
+            if (_balances[recipient] != 0) _holderCount--;
+        } else {
+            if (_balances[recipient] == 0) _holderCount++;
+        }
         // subtract form sender, give to receiver, burn the fee
         uint256 tAmount = amount.mul(transferFee).div(10**2);
         uint256 tax = amount.sub(tAmount);
@@ -187,6 +195,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     function purchase() private nonReentrant returns (bool) {
         // make sure emergency mode is disabled
         require(!emergencyModeEnabled && Surge_Token_Activated, 'EMERGENCY MODE ENABLED');
+        // increment holder count
+        if (_balances[msg.sender] == 0) _holderCount++;
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
         // buy Tokens with the BNB received
@@ -237,6 +247,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         
         // make sure seller has this balance
         require(_balances[msg.sender] >= tokenAmount, 'cannot sell above token amount');
+        // decrement holder count
+        if (_balances[msg.sender] == tokenAmount) _holderCount--;
         // calculate the sell fee from this transaction
         uint256 tokensToSwap = tokenAmount.mul(sellFee).div(10**2);
         // subtract full amount from sender
@@ -450,7 +462,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     /** Transfers Ownership To Zero Address */
     function renounceOwnership() external onlyOwner {
-        _owner = payable(address(0));
+        _owner = address(0);
         emit TransferOwnership(address(0));
     }
     
