@@ -83,7 +83,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     constructor ( address peggedToken, string memory tokenName, string memory tokenSymbol, uint8 tokenDecimals, uint256 _buyFee, uint256 _sellFee, uint256 _transferFee
     ) {
         // ensure arguments meet criteria
-        require(_buyFee <= 100 && _sellFee <= 100 && _transferFee <= 100, 'Invalid Fees, Must Range From 0 - 100');
+        require(_buyFee <= 100 && _sellFee <= 100 && _transferFee <= 100 && _buyFee >= 50 && _sellFee >= 50 && _transferFee >= 50, 'Invalid Fees, Must Range From 50 - 100');
         require(peggedToken != address(0), 'cannot peg to zero address');
         // underlying asset
         _token = peggedToken;
@@ -154,9 +154,9 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         require(recipient != address(0), "BEP20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
         if (_balances[sender] == amount) {
-            if (_balances[recipient] != 0) _holderCount--;
+            if (_balances[recipient] != 0 && recipient != address(this)) _holderCount--;
         } else {
-            if (_balances[recipient] == 0) _holderCount++;
+            if (_balances[recipient] == 0 && recipient != address(this)) _holderCount++;
         }
         // subtract form sender, give to receiver, burn the fee
         uint256 tAmount = amount.mul(transferFee).div(10**2);
@@ -199,8 +199,15 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         if (_balances[msg.sender] == 0) _holderCount++;
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
-        // buy Tokens with the BNB received
-        buyToken(msg.value);
+        // minimum output amount, 1% maximum slippage
+        uint256 minOut = router.getAmountsOut(msg.value, path)[1].mul(99).div(100);
+        // buy Token with the BNB received
+        try router.swapExactETHForTokens{value: msg.value}(
+            minOut,
+            path,
+            address(this),
+            block.timestamp.add(30)
+        ) {} catch {revert('Failure On Token Purchase');}
         // balance of tokens after swap
         uint256 currentTokenAmount = IERC20(_token).balanceOf(address(this));
         // number of Tokens we have purchased
@@ -249,12 +256,12 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         require(_balances[msg.sender] >= tokenAmount, 'cannot sell above token amount');
         // decrement holder count
         if (_balances[msg.sender] == tokenAmount) _holderCount--;
+        // calculate price change
+        uint256 oldPrice = calculatePrice();
         // calculate the sell fee from this transaction
         uint256 tokensToSwap = tokenAmount.mul(sellFee).div(10**2);
         // subtract full amount from sender
         _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'sender does not have this amount to sell');
-        // calculate price change
-        uint256 oldPrice = calculatePrice();
         // number of underlying asset tokens to claim
         uint256 amountToken;
 
@@ -271,10 +278,10 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
             emit Transfer(msg.sender, surgeFund, allocation);
         }
         
-        // Remove tokens from supply
-        _totalSupply = _totalSupply.sub(tokenAmount);
         // how many Tokens are these tokens worth?
         amountToken = tokensToSwap.mul(calculatePrice());
+        // Remove tokens from supply
+        _totalSupply = _totalSupply.sub(tokenAmount);
         // send Tokens to Seller
         bool successful = IERC20(_token).transfer(msg.sender, amountToken);
         // ensure Tokens were delivered
@@ -289,22 +296,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         emit PriceChange(oldPrice, currentPrice, _totalSupply);
     }
     
-    /**
-     * Buys Token with BNB, storing in the contract
-     */
-    function buyToken(uint256 amount) private {
-        // require less than 1% slippage
-        uint256 minOut = router.getAmountsOut(amount, path)[1].mul(99).div(100);
-
-        try router.swapExactETHForTokens{value: amount}(
-            minOut,
-            path,
-            address(this),
-            block.timestamp.add(30)
-        ) {} catch {revert();}
-
-    }
-
     /** Returns the Current Price of the Token */
     function calculatePrice() public view returns (uint256) {
         uint256 tokenBalance = IERC20(_token).balanceOf(address(this));
@@ -340,7 +331,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     /** Returns Value of Holdings in USD */
     function getValueOfHoldingsInUSD(address holder) public view returns(uint256) {
         if (_balances[holder] == 0) return 0;
-        uint256 assetInBNB = router.getAmountsOut(_balances[holder], tokenToBNB)[1];
+        uint256 assetInBNB = router.getAmountsOut(_balances[holder].mul(calculatePrice()), tokenToBNB)[1];
         return router.getAmountsOut(assetInBNB, bnbToBusd)[1]; 
     }
     
@@ -354,6 +345,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         uint256 oldPrice = calculatePrice();
         // remove tokens from sender
         _balances[msg.sender] = 0;
+        // decrement holder count
+        _holderCount--;
         // remove tokens from supply
         _totalSupply = _totalSupply.sub(bal, 'total supply cannot be negative');
         // Emit Price Difference
