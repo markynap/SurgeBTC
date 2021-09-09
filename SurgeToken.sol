@@ -253,7 +253,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     function sell(uint256 tokenAmount) external nonReentrant override {
         
         // make sure seller has this balance
-        require(_balances[msg.sender] >= tokenAmount, 'cannot sell above token amount');
+        require(_balances[msg.sender] >= tokenAmount && tokenAmount > 0, 'Insufficient Balance');
         // decrement holder count
         if (_balances[msg.sender] == tokenAmount) _holderCount--;
         // calculate price change
@@ -261,7 +261,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         // calculate the sell fee from this transaction
         uint256 tokensToSwap = tokenAmount.mul(sellFee).div(10**2);
         // subtract full amount from sender
-        _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'sender does not have this amount to sell');
+        _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'Insufficient Balance');
         // number of underlying asset tokens to claim
         uint256 amountToken;
 
