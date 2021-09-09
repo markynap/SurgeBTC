@@ -66,10 +66,10 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     address[] bnbToBusd;
     
     // owner
-    address _owner;
+    address public _owner;
     
     // Activates Surge Token Trading
-    bool Surge_Token_Activated;
+    bool public Surge_Token_Activated;
     
     // number of token holders
     uint256 public _holderCount;
