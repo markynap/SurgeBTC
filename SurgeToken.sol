@@ -197,6 +197,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         require(!emergencyModeEnabled && Surge_Token_Activated, 'EMERGENCY MODE ENABLED');
         // increment holder count
         if (_balances[msg.sender] == 0) _holderCount++;
+        // calculate price change
+        uint256 oldPrice = calculatePrice();
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
         // minimum output amount, 1% maximum slippage
@@ -222,8 +224,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         uint256 tokensToSend = nShouldPurchase.mul(buyFee).div(10**2);
         // revert if under 1
         require(tokensToSend > 0, 'Must Purchase At Least One Surge');
-        // calculate price change
-        uint256 oldPrice = calculatePrice();
 
         if (allowFunding && msg.sender != surgeFund) {
             // allocate tokens to go to the Surge Fund
