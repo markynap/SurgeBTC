@@ -7,6 +7,8 @@ import "./IUniswapV2Router02.sol";
 import "./ReentrantGuard.sol";
 import "./IERC20.sol";
 import "./INativeSurge.sol";
+import "./XTokenManagerDatabase.sol";
+
 /**
  * Contract: Surge Token
  * Developed By: Markymark (aka DeFi Mark)
@@ -17,7 +19,7 @@ import "./INativeSurge.sol";
  * Price is calculated as a ratio between Total Supply and underlying asset in Contract
  *
  */
-contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
+contract SurgeToken is ReentrancyGuard, INativeSurge {
     
     using SafeMath for uint256;
     using SafeMath for uint8;
@@ -71,6 +73,12 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     // Activates Surge Token Trading
     bool Surge_Token_Activated;
     
+    // xToken Database
+    XTokenManagerDatabase db;
+    
+    // slippage for purchasing _token
+    uint256 _tokenSlippage;
+    
     modifier onlyOwner() {
         require(msg.sender == _owner, 'Only Owner Function');
         _;
@@ -94,6 +102,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         transferFee = _transferFee;
         // initialize Pancakeswap Router
         router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+        db = XTokenManagerDatabase(0xA2557743912d998d263c4BAFcef2839EF608B509);
         // ownership
         _owner = msg.sender;
         // initialize pcs path for swapping
@@ -107,6 +116,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         tokenToBNB[1] = router.WETH();
         bnbToBusd[0] = router.WETH();
         bnbToBusd[1] = 0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
+        // slippage
+        _tokenSlippage = 995;
         // allot starting 1 billion to contract to be Garbage Collected
         _balances[address(this)] = _totalSupply;
         emit Transfer(address(0), address(this), _totalSupply);
@@ -141,7 +152,12 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
 
     /** Transfer Function */
     function transferFrom(address sender, address recipient, uint256 amount) external override returns (bool) {
-        require(sender == msg.sender);
+        if (isXTokenManager(msg.sender)) {
+            _allowances[sender][msg.sender] = _allowances[sender][msg.sender].sub(amount, 'Insufficient Allowance');
+        } else {
+            require(sender == msg.sender, 'Only SurgeToken Owner Can Transfer Funds');
+        }
+        
         return _transferFrom(sender, recipient, amount);
     }
     
@@ -191,8 +207,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         uint256 oldPrice = calculatePrice();
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
-        // minimum output amount, 1% maximum slippage
-        uint256 minOut = router.getAmountsOut(msg.value, path)[1].mul(99).div(100);
+        // minimum output amount
+        uint256 minOut = router.getAmountsOut(msg.value, path)[1].mul(_tokenSlippage).div(1000);
         // buy Token with the BNB received
         try router.swapExactETHForTokens{value: msg.value}(
             minOut,
@@ -320,6 +336,12 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         return router.getAmountsOut(assetInBNB, bnbToBusd)[1]; 
     }
     
+    /** Returns Value of Underlying Asset in USD */
+    function getValueOfUnderlyingAssetInUSD() public view returns(uint256) {
+        uint256 assetInBNB = router.getAmountsOut(10**18, tokenToBNB)[1];
+        return router.getAmountsOut(assetInBNB, bnbToBusd)[1];
+    }
+    
     /** Allows A User To Erase Their Holdings From Supply */
     function eraseHoldings() external {
         // get balance of caller
@@ -404,6 +426,13 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         emit SwappedFundReceiver(newFundReceiver);
     }
     
+    /** Change The Address For The Charity or Fund That Surge Allocates Funding Tax To */
+    function setMinimumTokenSlippage(uint256 newSlippage) external onlyOwner {
+        require(newSlippage <= 1000);
+        _tokenSlippage = newSlippage;
+        emit SetMinimumTokenSlippage(newSlippage);
+    }
+    
     /** Updates The Threshold To Trigger The Garbage Collector */
     function changeGarbageCollectorThreshold(uint256 garbageThreshold) external onlyOwner {
         require(garbageThreshold > 0 && garbageThreshold <= 10**12, 'invalid threshold');
@@ -434,6 +463,16 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         }
     }
     
+    /** Returns true if manager is a registered xTokenManager */
+    function isXTokenManager(address manager) public view returns (bool) {
+        return db.getIsXTokenManager(manager);
+    }
+    
+    function upgradeXTokenManagerDatabase(address newDatabase) external onlyOwner {
+        db = XTokenManagerDatabase(newDatabase);
+        emit UpgradeXTokenManagerDatabase(newDatabase);
+    }
+    
     /** Transfers Ownership To Another User */
     function transferOwnership(address newOwner) external onlyOwner {
         _owner = newOwner;
@@ -457,8 +496,10 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     event FundingValuesChanged(uint256 buySellDenominator, uint256 transferDenominator);
     event ErasedHoldings(address who, uint256 amountTokensErased);
     event UpdatedGarbageCollectorThreshold(uint256 newThreshold);
+    event UpgradeXTokenManagerDatabase(address newDatabase);
     event GarbageCollected(uint256 amountTokensErased);
     event SwappedFundReceiver(address newFundReceiver);
+    event SetMinimumTokenSlippage(uint256 newSlippage);
     event PancakeswapRouterUpdated(address newRouter);
     event TransferOwnership(address newOwner);
     event EmergencyModeEnabled();
