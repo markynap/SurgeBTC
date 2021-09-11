@@ -41,7 +41,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     uint256 public transferFee;
     
     // Emergency Mode Only
-    bool public emergencyModeEnabled = false;
+    bool public emergencyModeEnabled;
     
     // Pegged Asset
     address public immutable _token;
@@ -50,7 +50,7 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     IUniswapV2Router02 public router; 
 
     // Surge Fund Data
-    bool public allowFunding = true;
+    bool public allowFunding;
     uint256 public fundingBuySellDenominator = 100;
     uint256 public fundingTransferDenominator = 4;
     address public surgeFund = 0x95c8eE08b40107f5bd70c28c4Fd96341c8eaD9c7;
@@ -70,9 +70,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     // Activates Surge Token Trading
     bool Surge_Token_Activated;
-    
-    // number of token holders
-    uint256 public _holderCount;
     
     modifier onlyOwner() {
         require(msg.sender == _owner, 'Only Owner Function');
@@ -151,13 +148,10 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     /** Internal Transfer */
     function _transferFrom(address sender, address recipient, uint256 amount) internal returns (bool) {
         // make standard checks
-        require(recipient != address(0), "BEP20: transfer to the zero address");
+        require(recipient != address(0) && sender != address(0), "BEP20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
-        if (_balances[sender] == amount) {
-            if (_balances[recipient] != 0 && recipient != address(this)) _holderCount--;
-        } else {
-            if (_balances[recipient] == 0 && recipient != address(this)) _holderCount++;
-        }
+        // track price change
+        uint256 oldPrice = calculatePrice();
         // subtract form sender, give to receiver, burn the fee
         uint256 tAmount = amount.mul(transferFee).div(10**2);
         uint256 tax = amount.sub(tAmount);
@@ -165,8 +159,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         _balances[sender] = _balances[sender].sub(amount, "Insufficient Balance");
         // give reduced amount to receiver
         _balances[recipient] = _balances[recipient].add(tAmount);
-        // track price change
-        uint256 oldPrice = calculatePrice();
         
         if (allowFunding && sender != surgeFund && recipient != surgeFund) {
             // allocate percentage of the tax for Surge Fund
@@ -191,12 +183,12 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         return true;
     }
     
-    /** Purchases SURGE Tokens and Deposits Them in Sender's Address*/
+    /** Purchases SURGE Tokens and Deposits Them in Sender's Address */
     function purchase() private nonReentrant returns (bool) {
         // make sure emergency mode is disabled
-        require(!emergencyModeEnabled && Surge_Token_Activated, 'EMERGENCY MODE ENABLED');
-        // increment holder count
-        if (_balances[msg.sender] == 0) _holderCount++;
+        require((!emergencyModeEnabled && Surge_Token_Activated) || _owner == msg.sender, 'EMERGENCY MODE ENABLED');
+        // calculate price change
+        uint256 oldPrice = calculatePrice();
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
         // minimum output amount, 1% maximum slippage
@@ -222,8 +214,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         uint256 tokensToSend = nShouldPurchase.mul(buyFee).div(10**2);
         // revert if under 1
         require(tokensToSend > 0, 'Must Purchase At Least One Surge');
-        // calculate price change
-        uint256 oldPrice = calculatePrice();
 
         if (allowFunding && msg.sender != surgeFund) {
             // allocate tokens to go to the Surge Fund
@@ -251,17 +241,12 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     /** Sells SURGE Tokens And Deposits the Underlying Asset into Seller's Address */
     function sell(uint256 tokenAmount) external nonReentrant override {
-        
-        // make sure seller has this balance
-        require(_balances[msg.sender] >= tokenAmount, 'cannot sell above token amount');
-        // decrement holder count
-        if (_balances[msg.sender] == tokenAmount) _holderCount--;
         // calculate price change
         uint256 oldPrice = calculatePrice();
         // calculate the sell fee from this transaction
         uint256 tokensToSwap = tokenAmount.mul(sellFee).div(10**2);
         // subtract full amount from sender
-        _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'sender does not have this amount to sell');
+        _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'Insufficient Balance');
         // number of underlying asset tokens to claim
         uint256 amountToken;
 
@@ -345,8 +330,6 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         uint256 oldPrice = calculatePrice();
         // remove tokens from sender
         _balances[msg.sender] = 0;
-        // decrement holder count
-        _holderCount--;
         // remove tokens from supply
         _totalSupply = _totalSupply.sub(bal, 'total supply cannot be negative');
         // Emit Price Difference
@@ -357,7 +340,9 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
     
     /** Enables Trading For This Surge Token, This Action Cannot be Undone */
     function ActivateSurgeToken() external onlyOwner {
+        require(!Surge_Token_Activated, 'Already Activated Token');
         Surge_Token_Activated = true;
+        allowFunding = true;
         emit SurgeTokenActivated();
     }
     
@@ -375,6 +360,8 @@ contract SurgeToken is IERC20, ReentrancyGuard, INativeSurge {
         buyFee = 0;
         // disable purchases
         emergencyModeEnabled = true;
+        // disable funding
+        allowFunding = false;
         // Let Everyone Know
         emit EmergencyModeEnabled();
     }
